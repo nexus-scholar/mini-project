@@ -9,7 +9,13 @@
 <body class="bg-gray-100 min-h-screen p-6" x-data="app()" x-init="loadUsers()">
 
   <div class="max-w-4xl mx-auto">
-    <h1 class="text-2xl font-bold text-center text-blue-700 mb-6">User Management System</h1>
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-blue-700">User Management System</h1>
+      <div class="flex items-center gap-2">
+        <button @click="createDemo()" class="btn-secondary text-sm">Populate demo users</button>
+        <span class="text-gray-500 text-sm" x-show="total !== null">Total: <strong x-text="total"></strong></span>
+      </div>
+    </div>
 
     <!-- Notification -->
     <div x-show="msg.text" x-transition
@@ -26,9 +32,10 @@
         <input x-model="form.birth_place" placeholder="Birth Place" class="input" />
         <input x-model="form.phone"       placeholder="Phone Number" class="input col-span-2" />
       </div>
-      <div class="mt-4 flex gap-2">
-        <button @click="submitForm()" class="btn-primary" x-text="editId ? 'Update User' : 'Add User'"></button>
+      <div class="mt-4 flex gap-2 items-center">
+        <button :disabled="loading" @click="submitForm()" class="btn-primary" x-text="editId ? 'Update User' : 'Add User'"></button>
         <button x-show="editId" @click="resetForm()" class="btn-secondary">Cancel</button>
+        <div x-show="loading" class="text-gray-500 text-sm ml-2">Working...</div>
       </div>
     </div>
 
@@ -82,6 +89,8 @@
   <script>
     function app() {
       return {
+        loading: false,
+        total: null,
         form: {
           first_name: '',
           last_name: '',
@@ -103,23 +112,50 @@
         },
 
         async loadUsers() {
-          const res = await fetch(`/users?q=${encodeURIComponent(this.search)}`);
-          this.userList = await res.json();
+          this.loading = true;
+          try {
+            const res = await fetch(`/users?q=${encodeURIComponent(this.search)}`);
+            const data = await res.json();
+            this.userList = Array.isArray(data) ? data : [];
+            this.total = this.userList.length;
+          } catch (e) {
+            this.notify('Could not load users', 'error');
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        validateForm() {
+          if (!this.form.first_name.trim()) return 'First name is required.';
+          if (!this.form.last_name.trim()) return 'Last name is required.';
+          if (!this.form.birth_date) return 'Birth date is required.';
+          if (!this.form.birth_place.trim()) return 'Birth place is required.';
+          if (!/^\+?[0-9]{7,15}$/.test(this.form.phone.trim())) return 'Phone must be 7-15 digits, optional +.';
+          return null;
         },
 
         async submitForm() {
-          const method = this.editId ? 'PUT' : 'POST';
-          const url    = this.editId ? `/users/${this.editId}` : '/users';
-          const res    = await fetch(url, {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(this.form)
-          });
-          const data = await res.json();
-          if (data.error) return this.notify(data.error, 'error');
-          this.notify(data.success);
-          this.resetForm();
-          this.loadUsers();
+          const err = this.validateForm();
+          if (err) return this.notify(err, 'error');
+          this.loading = true;
+          try {
+            const method = this.editId ? 'PUT' : 'POST';
+            const url    = this.editId ? `/users/${this.editId}` : '/users';
+            const res    = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.form)
+            });
+            const data = await res.json();
+            if (data.error) return this.notify(data.error, 'error');
+            this.notify(data.success || 'Saved');
+            this.resetForm();
+            await this.loadUsers();
+          } catch (e) {
+            this.notify('Failed to save user', 'error');
+          } finally {
+            this.loading = false;
+          }
         },
 
         editUser(u) {
@@ -131,11 +167,34 @@
 
         async deleteUser(id) {
           if (!confirm('Are you sure you want to delete this user?')) return;
-          const res  = await fetch(`/users/${id}`, { method: 'DELETE' });
-          const data = await res.json();
-          if (data.error) return this.notify(data.error, 'error');
-          this.notify(data.success);
-          this.loadUsers();
+          this.loading = true;
+          try {
+            const res  = await fetch(`/users/${id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.error) return this.notify(data.error, 'error');
+            this.notify(data.success);
+            await this.loadUsers();
+          } catch (e) {
+            this.notify('Failed to delete user', 'error');
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async createDemo() {
+          if (!confirm('Create demo users? This may add up to 3 users.')) return;
+          this.loading = true;
+          try {
+            const res = await fetch('/demo/create');
+            const data = await res.json();
+            if (data.created && data.created.length) this.notify(`Created ${data.created.length} demo users`);
+            if (data.skipped && data.skipped.length) console.log('Skipped:', data.skipped);
+            await this.loadUsers();
+          } catch (e) {
+            this.notify('Failed to create demo users', 'error');
+          } finally {
+            this.loading = false;
+          }
         },
 
         resetForm() {

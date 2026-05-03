@@ -30,21 +30,37 @@ class User:
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 
-try:
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
-    client.server_info()
-    db = client["user_management"]
-    users_collection = db["users"]
-    users_collection.create_index("phone", unique=True)
-except errors.ServerSelectionTimeoutError:
-    print("ERROR: Could not connect to MongoDB.")
-    users_collection = None
+# Lazy connection: connect only when first needed
+_client = None
+_users_collection = None
+_connection_error = None
+
+
+def _init_db():
+    """Initialize MongoDB connection on first use (lazy)."""
+    global _client, _users_collection, _connection_error
+    
+    if _users_collection is not None:
+        return  # Already initialized
+    
+    try:
+        _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        _client.server_info()  # Test connection
+        db = _client["user_management"]
+        _users_collection = db["users"]
+        _users_collection.create_index("phone", unique=True)
+        print("✓ Connected to MongoDB")
+    except Exception as e:
+        _connection_error = str(e)
+        print(f"⚠ MongoDB connection failed: {_connection_error}")
+        _users_collection = None
 
 
 def _require_collection():
-    if users_collection is None:
-        raise RuntimeError("MongoDB is not available.")
-    return users_collection
+    _init_db()
+    if _users_collection is None:
+        raise RuntimeError(f"MongoDB is not available: {_connection_error}")
+    return _users_collection
 
 
 def _serialize_user(document):

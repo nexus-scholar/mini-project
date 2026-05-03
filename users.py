@@ -44,7 +44,8 @@ def _init_db():
         return  # Already initialized
     
     try:
-        _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        # Use longer timeout for Atlas clusters (they can be slow)
+        _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=15000, connectTimeoutMS=15000)
         _client.server_info()  # Test connection
         db = _client["user_management"]
         _users_collection = db["users"]
@@ -52,14 +53,17 @@ def _init_db():
         print("✓ Connected to MongoDB")
     except Exception as e:
         _connection_error = str(e)
-        print(f"⚠ MongoDB connection failed: {_connection_error}")
+        print(f"⚠ MongoDB connection failed (will retry on next request): {type(e).__name__}")
         _users_collection = None
+        _client = None
 
 
 def _require_collection():
+    global _connection_error
     _init_db()
     if _users_collection is None:
-        raise RuntimeError(f"MongoDB is not available: {_connection_error}")
+        msg = f"MongoDB is not available: {_connection_error}" if _connection_error else "MongoDB is not available."
+        raise RuntimeError(msg)
     return _users_collection
 
 
